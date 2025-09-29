@@ -67,6 +67,5 @@ class ConnectionManager:
         print(f"Cliente {client_socket.getpeername()} cancelou a inscrição no tópico: {topic}")
 
     def disconnect(self, client_socket, addr):
-        # Lógica para limpar os dados do cliente
         print(f"[*] Conexão de {addr} encerrada.")
         client_socket.close()

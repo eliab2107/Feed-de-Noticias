@@ -3,12 +3,11 @@ import json
 import tkinter as tk
 from tkinter import messagebox
 
-# --- Configurações da Aplicação e Sockets ---
+
 SERVER_HOST = 'localhost'
 SERVER_PORT = 5000
 editor_socket = None
 
-# --- Funções de Lógica do Editor ---
 def connect_to_server():
    
     global editor_socket
@@ -50,15 +49,14 @@ def publish_message():
     try:
         editor_socket.sendall(json.dumps(message).encode('utf-8'))
         messagebox.showinfo("Sucesso", f"Mensagem publicada com sucesso no tópico: '{topic}'")
-        
-        # Limpa os campos após a publicação
+    
         topic_entry.delete(0, tk.END)
         title_entry.delete(0, tk.END)
         body_entry.delete(0, tk.END)
     except Exception as e:
         messagebox.showerror("Erro de Envio", f"Ocorreu um erro ao enviar a mensagem: {e}")
 
-# --- Criação da Interface Gráfica (Tkinter) ---
+
 root = tk.Tk()
 root.title("Editor de Notícias")
 root.geometry("400x350")

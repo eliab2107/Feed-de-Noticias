@@ -1,6 +1,6 @@
-# Feed de Notícias Contínuo (Cliente-Servidor TCP)
+# Feed de Notícias Contínuo (Cliente-Servidor UDP)
 
-Este projeto implementa uma aplicação **cliente-servidor** usando **socket TCP**, onde os clientes recebem notícias em tempo real de acordo com as categorias nas quais estão inscritos.
+Este projeto implementa uma aplicação **cliente-servidor** usando **socket UDP**, onde os clientes recebem notícias em tempo real de acordo com as categorias nas quais estão inscritos.
 
 ---
 
@@ -28,6 +28,7 @@ Instalar as dependências:
 pip install -r requirements.txt
 ```
 
+OBS: Versões mais recente podem não precisar desta etapa. Verifique se o arquivo requiriments.txt existe na raiz do diretório.
 ---
 
 ## Como Executar
@@ -39,7 +40,7 @@ A aplicação deve ser iniciada em **três etapas**: **Servidor**, **Editor** e 
 No terminal, dentro da pasta raiz do projeto:
 
 ```bash
-python Feed_De_Noticias/Servidor/Server.py
+python Feed_De_Noticias/UDP_Version/Servidor/Server.py
 ```
 
 O servidor ficará ativo aguardando as conexões de clientes e do editor.
@@ -49,7 +50,7 @@ O servidor ficará ativo aguardando as conexões de clientes e do editor.
 Em outro terminal:
 
 ```bash
-python Feed_De_Noticias/Editor/Editor.py
+python Feed_De_Noticias/UDP_Version/Editor/Editor.py
 ```
 
 O editor será responsável por publicar notícias informando **topic, title e body**.
@@ -60,7 +61,7 @@ Essas notícias serão enviadas imediatamente para os clientes inscritos naquele
 Em outro terminal (um ou mais clientes podem ser iniciados):
 
 ```bash
-python Feed_De_Noticias/Cliente/Client.py
+python Feed_De_Noticias/UDP_Version/Cliente/Client.py
 ```
 
 O cliente poderá interagir enviando comandos como:
@@ -73,7 +74,7 @@ O cliente poderá interagir enviando comandos como:
 
 ## Observações
 
-* O projeto usa **sockets TCP persistentes** para manter a comunicação em tempo real.
+* O projeto usa **sockets UDP persistentes** para manter a comunicação em tempo real.
 * Suporta **múltiplos clientes simultâneos**.
 * O editor é essencial para o funcionamento, pois ele publica as notícias que serão distribuídas.
 
