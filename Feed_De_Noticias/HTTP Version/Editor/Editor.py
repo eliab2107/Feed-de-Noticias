@@ -1,83 +1,86 @@
-import socket
-import json
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import scrolledtext, messagebox
+import requests
 
+SERVER_URL = "http://localhost:8080"
 
+class PublisherGUI:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Publisher Client")
 
-EDITOR_HOST = 'localhost'
-EDITOR_PORT = 0
+        # Campos de entrada
+        tk.Label(root, text="Título:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        self.title_entry = tk.Entry(root, width=40)
+        self.title_entry.grid(row=0, column=1, padx=5, pady=5, columnspan=2)
 
-SERVER_HOST = 'localhost'
-SERVER_PORT = 6000
+        tk.Label(root, text="Tópico:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+        self.topic_entry = tk.Entry(root, width=40)
+        self.topic_entry.grid(row=1, column=1, padx=5, pady=5, columnspan=2)
 
-class EditorApp():
-    def __init__(self):
-        self.editor_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.server = (SERVER_HOST, SERVER_PORT)
-        self.create_gui()
+        tk.Label(root, text="Mensagem:").grid(row=2, column=0, padx=5, pady=5, sticky="nw")
+        self.body_text = scrolledtext.ScrolledText(root, width=40, height=8)
+        self.body_text.grid(row=2, column=1, padx=5, pady=5, columnspan=2)
+
+        # Botões
+        self.connect_btn = tk.Button(root, text="Conectar", command=self.connect_server)
+        self.connect_btn.grid(row=3, column=1, padx=5, pady=5, sticky="e")
+
+        self.publish_btn = tk.Button(root, text="Publicar", command=self.publish_message, state=tk.DISABLED)
+        self.publish_btn.grid(row=3, column=2, padx=5, pady=5, sticky="w")
+
+        # Caixa de log
+        self.log = scrolledtext.ScrolledText(root, width=60, height=12, state=tk.DISABLED)
+        self.log.grid(row=4, column=0, columnspan=3, padx=5, pady=5)
+
+        self.connected = False
+
+    def log_message(self, msg):
+        self.log.config(state=tk.NORMAL)
+        self.log.insert(tk.END, msg + "\n")
+        self.log.see(tk.END)
+        self.log.config(state=tk.DISABLED)
+
+    def connect_server(self):
+        if self.connected:
+            messagebox.showinfo("Conexão", "Já conectado!")
+            return
+        # Aqui poderíamos testar uma requisição simples para validar a conexão
+        try:
+            r = requests.get(SERVER_URL + "/hello")
+            if r.status_code == 200:
+                self.connected = True
+                self.log_message("Conectado ao servidor com sucesso!")
+                self.publish_btn.config(state=tk.NORMAL)
+            else:
+                self.log_message(f"Falha ao conectar. Status: {r.status_code}")
+        except Exception as e:
+            self.log_message(f"Erro de conexão: {e}")
 
     def publish_message(self):
-
-        topic = self.topic_entry.get().strip()
-        title = self.title_entry.get().strip()
-        body  = self.body_entry.get().strip()
-
-        if not all([topic, title, body]):
-            messagebox.showwarning("Atenção", "Por favor, preencha todos os campos: Tópico, Título e Resumo.")
+        if not self.connected:
+            messagebox.showwarning("Aviso", "Conecte-se ao servidor primeiro!")
             return
-        
-        message = {
-            "command": "publish",
-            "topic": topic,
-            "title": title,
-            "body": body
-        }
+
+        title = self.title_entry.get().strip()
+        topic = self.topic_entry.get().strip()
+        body = self.body_text.get("1.0", tk.END).strip()
+
+        if not title or not topic or not body:
+            messagebox.showwarning("Aviso", "Preencha todos os campos!")
+            return
 
         try:
-            self.editor_socket.sendto(json.dumps(message).encode('utf-8'), self.server)
-            messagebox.showinfo("Sucesso", f"Mensagem publicada com sucesso no tópico: '{topic}'")
-            
-            # Limpa os campos após a publicação
-            self.topic_entry.delete(0, tk.END)
-            self.title_entry.delete(0, tk.END)
-            self.body_entry.delete(0, tk.END)
-            
+            payload = {"title": title, "topic": topic, "body": body}
+            r = requests.post(SERVER_URL + "/publish", data=payload)
+            if r.status_code == 200:
+                self.log_message(f"Publicado no tópico '{topic}': {title}")
+            else:
+                self.log_message(f"Erro ao publicar ({r.status_code})")
         except Exception as e:
-            messagebox.showerror("Erro de Envio", f"Ocorreu um erro ao enviar a mensagem: {e}")
+            self.log_message(f"Erro ao publicar: {e}")
 
-    # --- Criação da Interface Gráfica (Tkinter) ---
-    def create_gui(self):
-        self.root = tk.Tk()
-        self.root.title("Editor de Notícias")
-        self.root.geometry("400x350")
-
-        main_frame = tk.Frame(self.root, padx=10, pady=10)
-        main_frame.pack(fill=tk.BOTH, expand=True)
-
-        # Campo de entrada para o tópico
-        tk.Label(main_frame, text="Tópico:", anchor='w').pack(fill=tk.X, pady=(0, 5))
-        self.topic_entry = tk.Entry(main_frame)
-        self.topic_entry.pack(fill=tk.X, ipady=3)
-
-        # Campo de entrada para o título
-        tk.Label(main_frame, text="Título:", anchor='w').pack(fill=tk.X, pady=(5, 5))
-        self.title_entry = tk.Entry(main_frame)
-        self.title_entry.pack(fill=tk.X, ipady=3)
-
-        # Campo de entrada para o resumo
-        tk.Label(main_frame, text="Resumo:", anchor='w').pack(fill=tk.X, pady=(5, 5))
-        self.body_entry = tk.Entry(main_frame)
-        self.body_entry.pack(fill=tk.X, ipady=3)
-
-        # Botões de ação
-        button_frame = tk.Frame(main_frame)
-        button_frame.pack(pady=20)
-        publish_button = tk.Button(button_frame, text="Publicar", command=self.publish_message)
-        publish_button.pack(side=tk.LEFT, padx=5)
-
-        # Executa o loop principal da interface
-        self.root.mainloop()
-        
 if __name__ == "__main__":
-    editor = EditorApp()
+    root = tk.Tk()
+    app = PublisherGUI(root)
+    root.mainloop()

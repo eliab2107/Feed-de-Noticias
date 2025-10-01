@@ -1,64 +1,109 @@
-import socket
-from threading import Thread, Lock
-from LittleParser import Little_Parser
-import json
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Lock, Thread
+import time
 
-HOST = 'localhost'
-PORT = 8080
-class client_info():
-    def __init__(self, socket, addr):
-        self.conn = socket
-        self.addr = addr
-        self.subscriptions = []
+# Lista global de clientes conectados
+clients = []
+clients_lock = Lock()
+
+
+class Topic:
+    def __init__(self, title):
+        self.users = []
+        self.notices = []
+        self.title = ""
         
-class ServerApp():
+class TopicsManager:
     def __init__(self):
-        self.clients = {}
         self.topics = {}
-        self.endpoints = {"/subscribe": self.handle_subscribe, "/unsubscribe": self.handle_unsubscribe, "/publish": self.handle_publish, "/hello": self.hello}  
-        self.clients_lock = Lock()
-        self.topics_lock = Lock()
-        
-        self.editor_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.editor_socket.bind((HOST, PORT))
-        self.editor_socket.listen()
-        print(f"Server listening for clients on {HOST}:{PORT}")
-        Thread(target=self.run_server).start()
 
-    
-    def hello(self, client, message):
-       print(f"Hello from {client.addr}: {message.get_body()}")
-       
-       
-    def run_server(self):
-        while True:
-            print("Connection accepted")
-            socket, addr = self.editor_socket.accept()
-            print(f"Connected by {addr}")
-            self.handle_client(socket, addr)
-    
+    def subscribe(self, topic, client):
+        if topic not in self.topics:
+            self.topics[topic] = Topic(topic)
+        if client not in self.topics[topic]:
+            self.topics[topic].users.append(client)
+
+    def unsubscribe(self, topic, client):
+        if topic in self.topics and client in self.topics[topic].users:
+            self.topics[topic].users.remove(client)
         
-    def handle_subscribe(self):
-        pass
-    
-    def handle_unsubscribe(self):
-        pass
-    
-    def handle_publish(self):
-        pass
-    
-    def handle_client(self, socket, addr):
+
+    def publish_notice(self, topic, notice):
+        if topic in self.topics:
+            self.topics[topic].notices.append(notice)
+            for client in self.topics[topic].users:
+                client.sendall(notice)
+
+class SSEHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/stream":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+            self.topics_manager = TopicsManager()            
+            
+            with clients_lock:
+                clients.append(self.wfile)
+
+            try:
+                while True:
+                    self.wfile.write(b": keep-alive\n\n")
+                    self.wfile.flush()
+                    time.sleep(10)
+            except (ConnectionResetError, BrokenPipeError):
+                
+                with clients_lock:
+                    if self.wfile in clients:
+                        clients.remove(self.wfile)
+        else:
+            self.send_response(404)
+            self.end_headers()
+            
+    def do_POST(self):
+        if self.path == "/subscribe":
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            topic = post_data.decode('utf-8')
+            self.topics_manager.subscribe(topic, self.wfile)
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"Subscribed to topic")
+            
+        elif self.path == "/unsubscribe":
+            pass
         
-        if addr not in self.clients:
-            self.clients[addr] = client_info(socket, addr)
-        message = Little_Parser(socket.recv(1024).decode('utf-8'))    
-        print(f"Received from {addr}: {message.get_body()}")
-        print(f"Headers: {message.get_headers()}")
-        self.endpoints.get(message.get_path(), lambda c, m: None)(self.clients[addr], message)
+        elif self.path == "/publish":
+            pass 
+
+def broadcast(message: str):
+    data = f"data: {message}\n\n".encode("utf-8")
+    with clients_lock:
+        disconnected = []
+        for client in clients:
+            try:
+                client.write(data)
+                client.flush()
+            except (ConnectionResetError, BrokenPipeError):
+                disconnected.append(client)
+        for d in disconnected:
+            clients.remove(d)
+
+def event_generator():
+    i = 0
+    while True:
+        time.sleep(5)
+        msg = f"Broadcast {i}"
+        print(f"Enviando: {msg}")
+        #  broadcast(msg)
+        i += 1
 
 if __name__ == "__main__":
-    server = ServerApp()
-   
-    
-    
-    
+    server = ThreadingHTTPServer(("localhost", 8080), SSEHandler)
+    print("Servidor SSE rodando em http://localhost:8080/stream")
+
+    # Thread que gera mensagens periódicas
+    Thread(target=event_generator, daemon=True).start()
+
+    server.serve_forever()
