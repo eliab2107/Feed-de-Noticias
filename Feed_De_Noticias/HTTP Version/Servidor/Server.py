@@ -1,109 +1,140 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from threading import Lock, Thread
+import json
+import threading
+import urllib.parse
 import time
+import queue
+import uuid
 
-# Lista global de clientes conectados
-clients = []
-clients_lock = Lock()
+HOST = 'localhost'
+PORT = 8080
 
+subscriptions = {}
+clients = {}
 
-class Topic:
-    def __init__(self, title):
-        self.users = []
-        self.notices = []
-        self.title = ""
-        
-class TopicsManager:
-    def __init__(self):
-        self.topics = {}
+subs_lock = threading.Lock()
 
-    def subscribe(self, topic, client):
-        if topic not in self.topics:
-            self.topics[topic] = Topic(topic)
-        if client not in self.topics[topic]:
-            self.topics[topic].users.append(client)
-
-    def unsubscribe(self, topic, client):
-        if topic in self.topics and client in self.topics[topic].users:
-            self.topics[topic].users.remove(client)
-        
-
-    def publish_notice(self, topic, notice):
-        if topic in self.topics:
-            self.topics[topic].notices.append(notice)
-            for client in self.topics[topic].users:
-                client.sendall(notice)
 
 class SSEHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path == "/stream":
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Cache-Control", "no-cache")
-            self.send_header("Connection", "keep-alive")
-            self.end_headers()
-            self.topics_manager = TopicsManager()            
-            
-            with clients_lock:
-                clients.append(self.wfile)
+        parsed = urllib.parse.urlparse(self.path)
+        topic = urllib.parse.parse_qs(parsed.query).get('topic', [None])[0]
+        if not topic:
+            self.send_error(400, "Faltou parâmetro topic")
+            return
 
-            try:
-                while True:
-                    self.wfile.write(b": keep-alive\n\n")
+       
+        client_id = str(uuid.uuid4())
+        q = queue.Queue()
+
+        with subs_lock:
+            clients[client_id] = {"queue": q, "topics": set([topic])}
+            
+            subscriptions.setdefault(topic, {})[client_id] = q
+            print(f"[SERVER] Cliente {client_id} conectado em '{topic}'")
+
+    
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/event-stream')
+        self.send_header('Cache-Control', 'no-cache')
+        self.send_header('Connection', 'keep-alive')
+        self.end_headers()
+
+        self.wfile.write(f"data: {json.dumps({'client_id': client_id})}\n\n".encode("utf-8"))
+        self.wfile.flush()
+
+        try:
+            while True:
+                try:
+                    msg = q.get(timeout=0.5)
+                except queue.Empty:
+                    continue
+
+                try:
+                    self.wfile.write(f"data: {json.dumps(msg)}\n\n".encode("utf-8"))
                     self.wfile.flush()
-                    time.sleep(10)
-            except (ConnectionResetError, BrokenPipeError):
-                
-                with clients_lock:
-                    if self.wfile in clients:
-                        clients.remove(self.wfile)
-        else:
-            self.send_response(404)
-            self.end_headers()
-            
+                except (BrokenPipeError, ConnectionResetError):
+                    print(f"[SERVER] Cliente {client_id} desconectou")
+                    break
+
+        finally:
+            with subs_lock:
+                if client_id in clients:
+                    for t in clients[client_id]["topics"]:
+                        if client_id in subscriptions.get(t, {}):
+                            del subscriptions[t][client_id]
+                    del clients[client_id]
+                    print(f"[SERVER] Cliente {client_id} removido")
+
     def do_POST(self):
-        if self.path == "/subscribe":
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
-            topic = post_data.decode('utf-8')
-            self.topics_manager.subscribe(topic, self.wfile)
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b"Subscribed to topic")
-            
-        elif self.path == "/unsubscribe":
-            pass
-        
-        elif self.path == "/publish":
-            pass 
+        if self.path != "/publish":
+            self.send_error(404)
+            return
 
-def broadcast(message: str):
-    data = f"data: {message}\n\n".encode("utf-8")
-    with clients_lock:
-        disconnected = []
-        for client in clients:
+        length = int(self.headers.get("Content-Length", 0))
+        data = self.rfile.read(length)
+        try:
+            msg = json.loads(data.decode("utf-8"))
+            topic = msg["topic"]
+        except Exception as e:
+            self.send_error(400, f"JSON inválido: {e}")
+            return
+
+        with subs_lock:
+            queues = subscriptions.get(topic, {}).copy()
+        for cid, q in queues.items():
             try:
-                client.write(data)
-                client.flush()
-            except (ConnectionResetError, BrokenPipeError):
-                disconnected.append(client)
-        for d in disconnected:
-            clients.remove(d)
+                q.put(msg)
+            except Exception as e:
+                print(f"[SERVER] Erro ao enfileirar: {e}")
 
-def event_generator():
-    i = 0
-    while True:
-        time.sleep(5)
-        msg = f"Broadcast {i}"
-        print(f"Enviando: {msg}")
-        #  broadcast(msg)
-        i += 1
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK\n")
+
+    def do_PUT(self):
+        length = int(self.headers.get("Content-Length", 0))
+        data = self.rfile.read(length)
+        try:
+            body = json.loads(data.decode("utf-8"))
+            action = body.get("action")
+            client_id = body.get("client_id")
+            topic = body.get("topic")
+        except Exception as e:
+            self.send_error(400, f"JSON inválido: {e}")
+            return
+
+        if not action or not client_id or not topic:
+            self.send_error(400, "Faltam parâmetros: action, client_id, topic")
+            return
+
+        with subs_lock:
+            if client_id not in clients:
+                self.send_error(404, "Cliente não encontrado")
+                return
+
+            if action == "subscribe":
+                q = clients[client_id]["queue"]
+                subscriptions.setdefault(topic, {})[client_id] = q
+                clients[client_id]["topics"].add(topic)
+                print(f"[SERVER] Cliente {client_id} SUBSCRIBED em '{topic}'")
+
+            elif action == "unsubscribe":
+                if client_id in subscriptions.get(topic, {}):
+                    del subscriptions[topic][client_id]
+                clients[client_id]["topics"].discard(topic)
+                print(f"[SERVER] Cliente {client_id} UNSUBSCRIBED de '{topic}'")
+
+            else:
+                self.send_error(400, "Ação inválida (use 'subscribe' ou 'unsubscribe')")
+                return
+
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK\n")
+
 
 if __name__ == "__main__":
-    server = ThreadingHTTPServer(("localhost", 8080), SSEHandler)
-    print("Servidor SSE rodando em http://localhost:8080/stream")
-
-    # Thread que gera mensagens periódicas
-    Thread(target=event_generator, daemon=True).start()
-
+    server = ThreadingHTTPServer((HOST, PORT), SSEHandler)
+    print(f"[SERVER] Rodando em http://{HOST}:{PORT}")
     server.serve_forever()
