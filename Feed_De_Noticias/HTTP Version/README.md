@@ -1,85 +1,160 @@
-# Feed de Notícias Contínuo (Cliente-Servidor UDP)
+📡 Sistema de Feed Distribuído com HTTP + SSE
 
-Este projeto implementa uma aplicação **cliente-servidor** usando **socket UDP**, onde os clientes recebem notícias em tempo real de acordo com as categorias nas quais estão inscritos.
+Este projeto implementa um sistema de feed de notícias em tempo real utilizando HTTP e a técnica de Server-Sent Events (SSE).
 
----
+O objetivo é demonstrar como construir, do zero, um sistema distribuído onde múltiplos clientes podem se inscrever em tópicos de interesse e receber atualizações automaticamente sempre que novas mensagens forem publicadas, sem precisar ficar enviando requisições repetidamente.
 
-## Funcionalidades
+🚀 Como funciona o sistema
+🔹 Servidor (server.py)
 
-* O **servidor** mantém categorias de notícias (ex.: tecnologia, política, esportes, cultura).
-* As notícias são cadastradas por um **editor**, que publica novas entradas no sistema.
-* Assim que uma nova notícia é publicada, o servidor envia automaticamente para todos os clientes inscritos naquela categoria.
-* Os **clientes** podem:
+Implementado usando a biblioteca padrão do Python (http.server e ThreadingHTTPServer).
 
-  * Se conectar ao servidor.
-  * Escolher categorias de interesse (`SUBSCRIBE <categoria>`).
-  * Cancelar a inscrição em categorias (`UNSUBSCRIBE <categoria>`).
-* O servidor gerencia várias conexões simultâneas e envia apenas notícias das categorias que o cliente faz parte.
+Permite conexões HTTP normais, mas fornece suporte especial a SSE para streaming contínuo de eventos.
 
----
+Cada cliente que conecta em /stream?topic=... recebe:
 
-## Pré-requisitos
+Um UUID (client_id) único, enviado no primeiro evento.
 
-Antes de rodar o projeto, é necessário ter o python instalado!
+Eventos subsequentes de acordo com os tópicos em que estiver inscrito.
 
-Instalar as dependências:
+Mantém:
 
-```bash
-pip install -r requirements.txt
-```
+Uma lista de clientes ativos, cada um associado a uma fila (queue.Queue) para envio de mensagens.
 
-OBS: Versões mais recente podem não precisar desta etapa. Verifique se o arquivo requiriments.txt existe na raiz do diretório.
----
+Um dicionário de tópicos, cada um mapeando os clientes inscritos.
 
-## Como Executar
+Endpoints principais:
 
-A aplicação deve ser iniciada em **três etapas**: **Servidor**, **Editor** e **Cliente(s)**.
+GET /stream?topic=... → abre uma conexão SSE, entrega client_id e começa a enviar mensagens em tempo real.
 
-### 1. Iniciar o Servidor
+POST /publish → publica uma mensagem em um tópico; todos os inscritos recebem.
 
-No terminal, dentro da pasta raiz do projeto:
+PUT / → gerencia inscrições:
 
-```bash
-python Feed_De_Noticias/UDP_Version/Servidor/Server.py
-```
+{"action": "subscribe", "client_id": "...", "topic": "..."} → inscreve cliente em tópico.
 
-O servidor ficará ativo aguardando as conexões de clientes e do editor.
+{"action": "unsubscribe", "client_id": "...", "topic": "..."} → remove cliente de tópico.
 
-### 2. Iniciar o Editor
+🔹 Cliente Subscriber (subscriber_client.py)
 
-Em outro terminal:
+Interface gráfica feita com Tkinter.
 
-```bash
-python Feed_De_Noticias/UDP_Version/Editor/Editor.py
-```
+Funcionalidades:
 
-O editor será responsável por publicar notícias informando **topic, title e body**.
-Essas notícias serão enviadas imediatamente para os clientes inscritos naquele topic.
+Conectar ao servidor informando um tópico inicial.
 
-### 3. Conectar um Cliente
+Receber em tempo real os eventos de feed via SSE.
 
-Em outro terminal (um ou mais clientes podem ser iniciados):
+Visualizar no painel todas as atualizações recebidas.
 
-```bash
-python Feed_De_Noticias/UDP_Version/Cliente/Client.py
-```
+Inscrever-se em novos tópicos (PUT /subscribe).
 
-O cliente poderá interagir enviando comandos como:
+Cancelar inscrição em tópicos (PUT /unsubscribe).
 
-* `SUBSCRIBE tecnologia` → Inscreve-se na categoria **tecnologia**.
-* `UNSUBSCRIBE politica` → Cancela a inscrição na categoria **política**.
-* `EXIT` → Sair da aplicação. (através do botão da interface)
+Primeira mensagem recebida do servidor contém o client_id, que é salvo para futuras operações.
 
----
+🔹 Cliente Publisher (publisher_client.py) (opcional)
 
-## Observações
+Também em Tkinter.
 
-* O projeto usa **sockets UDP persistentes** para manter a comunicação em tempo real.
-* Suporta **múltiplos clientes simultâneos**.
-* O editor é essencial para o funcionamento, pois ele publica as notícias que serão distribuídas.
+Permite enviar mensagens para o servidor via POST /publish.
 
----
+O usuário preenche:
 
-## Equipe 04
-* Alice Vitória
-* Eliab Bernardino
+Título
+
+Tópico
+
+Corpo da mensagem
+
+O servidor, ao receber, envia essa mensagem a todos os clientes inscritos no tópico.
+
+📋 Requisitos
+
+Python 3.8+
+
+Nenhuma dependência externa é obrigatória (apenas a biblioteca padrão).
+
+Para rodar as GUIs (Tkinter), é necessário ter suporte gráfico no ambiente.
+
+▶️ Como rodar
+
+Clonar o repositório (ou copiar os arquivos para uma pasta).
+
+git clone https://github.com/eliab2107/Feed-de-Noticias.git
+
+
+Iniciar o servidor na pasta servidor execute:
+
+python server.py
+
+
+O servidor abrirá em http://localhost:8080.
+
+Rodar um cliente Subscriber na pasta Cliente execute:
+
+python client.py
+
+
+Digite um tópico inicial.
+
+Clique em Conectar.
+
+Use os botões Inscrever e Desinscrever para gerenciar tópicos.
+
+Rodar um cliente Publisher(Editor), na pasta Editor execute:
+
+python editor.py
+
+Informe tópico, título e corpo.
+
+Clique em Publicar para enviar ao servidor.
+
+🔧 Fluxo esperado
+
+O cliente Subscriber conecta ao servidor, recebendo seu client_id.
+
+O cliente pode se inscrever em múltiplos tópicos (usando PUT /subscribe).
+
+O cliente Publisher (ou qualquer requisição POST /publish) envia mensagens em um tópico.
+
+Todos os inscritos nesse tópico recebem o evento em tempo real, sem precisar atualizar ou enviar novas requisições.
+
+🧩 Estrutura de Mensagens
+
+Primeira mensagem ao conectar (client_id):
+
+{
+  "client_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+
+
+Mensagem publicada (broadcast para inscritos):
+
+{
+  "topic": "tecnologia",
+  "title": "Novo framework Python",
+  "body": "Lançada versão beta do framework X para desenvolvimento web."
+}
+
+📚 Conceitos envolvidos
+
+HTTP: protocolo base de comunicação.
+
+TCP: camada de transporte que garante entrega confiável.
+
+SSE (Server-Sent Events): técnica baseada em HTTP que mantém a conexão aberta para envio contínuo de dados do servidor → cliente.
+
+Pub/Sub (Publisher/Subscriber): modelo de comunicação onde clientes se inscrevem em tópicos e recebem mensagens publicadas por outros.
+
+✨ Pontos fortes da solução
+
+✅ Somente biblioteca padrão do Python
+
+✅ Suporte a múltiplos clientes simultâneos (via ThreadingHTTPServer)
+
+✅ Estrutura extensível para novos endpoints
+
+✅ Modelo Pub/Sub real em HTTP, sem precisar de WebSockets
+
+📌 Esse projeto foi desenvolvido como parte de um estudo em Plataformas Distribuídas, no contexto de um mestrado em Ciência da Computação.
